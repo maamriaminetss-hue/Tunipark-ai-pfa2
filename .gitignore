@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.idea/
+.vscode/
+target/
+*.log
+# Données et résultats générés
+data/metrics/*.csv
+
+# Tests et outils Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environnements virtuels supplémentaires
+venv/
+venvs/
