@@ -29,7 +29,8 @@ def test_mad_detects_a_large_spike():
     data = make_data([1.0] * 15 + [10.0])
     result = detect_anomalies(data, method="mad", min_history=12)
     assert bool(result.iloc[-1]["is_anomaly"]) is True
-    assert result.iloc[-1]["reason"] == "deviation_above_mad_limit"
+    assert result.iloc[-1]["reason"] == "deviation_from_constant_history"
+    assert pd.isna(result.iloc[-1]["score"])
 
 
 def test_ewma_detects_a_large_spike():
@@ -90,5 +91,5 @@ def test_mad_handles_constant_history_with_small_variation():
     last = result.iloc[-1]
 
     assert bool(last["is_anomaly"]) is True
-    assert last["reason"] == "deviation_above_mad_limit"
-    assert float(last["score"]) > 3.5
+    assert last["reason"] == "deviation_from_constant_history"
+    assert pd.isna(last["score"])

@@ -130,13 +130,26 @@ def detect_anomalies(
                     if method == "mad":
                         expected = float(np.median(history))
                         mad = float(np.median(np.abs(history - expected)))
-                        scale = max(1.4826 * mad, MIN_SCALE)
-                        score = abs(value - expected) / scale
-                        anomaly = score > threshold
-                        reason = (
-                            "deviation_above_mad_limit"
-                            if anomaly else "within_mad_limit"
-                        )
+                        deviation = abs(value - expected)
+
+                        if mad == 0.0:
+                            # Dispersion nulle : on ne calcule pas de score normalisé.
+                            score = np.nan
+                            anomaly = not np.isclose(
+                                value, expected, rtol=1e-9, atol=1e-12
+                            )
+                            reason = (
+                                "deviation_from_constant_history"
+                                if anomaly else "constant_history"
+                            )
+                        else:
+                            scale = 1.4826 * mad
+                            score = deviation / scale
+                            anomaly = score > threshold
+                            reason = (
+                                "deviation_above_mad_limit"
+                                if anomaly else "within_mad_limit"
+                            )
 
                     elif method == "ewma":
                         expected = _ewma(history, alpha)
