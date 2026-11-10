@@ -30,7 +30,7 @@ def test_mad_detects_a_large_spike():
     result = detect_anomalies(data, method="mad", min_history=12)
     assert bool(result.iloc[-1]["is_anomaly"]) is True
     assert result.iloc[-1]["reason"] == "deviation_from_constant_history"
-    assert pd.isna(result.iloc[-1]["score"])
+    assert result.iloc[-1]["score"] == pytest.approx(9_000_000)
 
 
 def test_ewma_detects_a_large_spike():
@@ -49,6 +49,8 @@ def test_fixed_method_uses_configured_limits():
     )
     assert result["is_anomaly"].tolist() == [False, False, True]
     assert result.iloc[-1]["reason"] == "above_fixed_upper"
+
+
 
 
 def test_mad_does_not_flag_before_minimum_history():
@@ -92,4 +94,21 @@ def test_mad_handles_constant_history_with_small_variation():
 
     assert bool(last["is_anomaly"]) is True
     assert last["reason"] == "deviation_from_constant_history"
-    assert pd.isna(last["score"])
+    assert last["score"] == pytest.approx(4167)
+def test_mad_ignores_floating_point_noise_in_constant_history():
+    data = make_data(
+        [0.0041669097364012905] * 12
+        + [0.0041668923733368893]
+    )
+
+    result = detect_anomalies(
+        data,
+        method="mad",
+        min_history=12,
+    )
+
+    last = result.iloc[-1]
+
+    assert bool(last["is_anomaly"]) is False
+    assert last["reason"] == "constant_history"
+    assert last["score"] < 3.5

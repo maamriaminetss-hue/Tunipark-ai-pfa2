@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+
 OUTPUT_COLUMNS = ["method", "expected", "score", "is_anomaly", "reason"]
 MIN_SCALE = 1e-6
 
@@ -132,20 +133,16 @@ def detect_anomalies(
                         mad = float(np.median(np.abs(history - expected)))
                         deviation = abs(value - expected)
 
+                        scale = max(1.4826 * mad, MIN_SCALE)
+                        score = deviation / scale
+                        anomaly = score > threshold
+
                         if mad == 0.0:
-                            # Dispersion nulle : on ne calcule pas de score normalisé.
-                            score = np.nan
-                            anomaly = not np.isclose(
-                                value, expected, rtol=1e-9, atol=1e-12
-                            )
                             reason = (
                                 "deviation_from_constant_history"
                                 if anomaly else "constant_history"
                             )
                         else:
-                            scale = 1.4826 * mad
-                            score = deviation / scale
-                            anomaly = score > threshold
                             reason = (
                                 "deviation_above_mad_limit"
                                 if anomaly else "within_mad_limit"
@@ -154,7 +151,8 @@ def detect_anomalies(
                     elif method == "ewma":
                         expected = _ewma(history, alpha)
                         scale = max(
-                            float(np.std(history, ddof=1)), MIN_SCALE
+                            float(np.std(history, ddof=1)),
+                            MIN_SCALE
                         )
                         score = abs(value - expected) / scale
                         anomaly = score > threshold
@@ -162,7 +160,6 @@ def detect_anomalies(
                             "deviation_above_ewma_limit"
                             if anomaly else "within_ewma_limit"
                         )
-
             record = row.to_dict()
             record.update({
                 "method": method,
