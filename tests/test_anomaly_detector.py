@@ -1,17 +1,7 @@
-from pathlib import Path
-import sys
-
 import pandas as pd
 import pytest
 
-DETECTOR_DIR = (
-    Path(__file__).resolve().parents[1] / "platform" / "detector"
-)
-sys.path.insert(0, str(DETECTOR_DIR))
-
-from anomaly_detector import detect_anomalies  # noqa: E402
-
-
+from aiops_platform.detector.anomaly_detector import detect_anomalies
 def make_data(values, currency="USD"):
     timestamps = pd.date_range(
         "2026-01-01T00:00:00Z",

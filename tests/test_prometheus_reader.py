@@ -1,16 +1,7 @@
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-# Import the reader without conflicting with Python's standard "platform" module.
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parents[1] / "platform" / "detector"),
-)
-
-import prometheus_reader
+from aiops_platform.detector import prometheus_reader
 
 
 class FakeResponse:

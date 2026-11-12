@@ -1,16 +1,10 @@
-
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-sys.path.insert(
-    0,
-    str(Path(__file__).resolve().parents[1] / "platform" / "incidents"),
+from aiops_platform.incidents.incident_manager import (
+    build_events,
+    create_incidents,
 )
-
-from incident_manager import build_events, create_incidents
 
 
 def make_row(
