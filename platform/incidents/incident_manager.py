@@ -2,7 +2,7 @@
 """Build anomaly events and correlate them into incidents."""
 
 from __future__ import annotations
-
+from aiops_observability.telemetry import observe
 import json
 import math
 from collections import defaultdict
@@ -90,7 +90,7 @@ def _dimensions_key(dimensions: dict[str, Any]) -> str:
         default=str,
     )
 
-
+@observe("build_events")
 def build_events(
     results: pd.DataFrame,
     group_by: Sequence[str] | None = None,
@@ -317,7 +317,7 @@ def correlate_events(
         key=lambda incident: incident["start_time"],
     )
 
-
+@observe("create_incidents")
 def create_incidents(
     results: pd.DataFrame,
     correlation_window_seconds: float = 90,

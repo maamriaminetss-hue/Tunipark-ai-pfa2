@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-
+from aiops_observability.telemetry import observe
 import numpy as np
 import pandas as pd
 
@@ -46,7 +46,7 @@ def _ewma(values, alpha):
         estimate = alpha * float(value) + (1 - alpha) * estimate
     return estimate
 
-
+@observe("anomaly_detection")
 def detect_anomalies(
     data: pd.DataFrame,
     method: str = "mad",
@@ -63,6 +63,7 @@ def detect_anomalies(
     Colonnes obligatoires : timestamp et value.
     Toutes les autres colonnes identifient une série, par exemple la devise.
     """
+    
     _validate(
         method, window, min_history, threshold, alpha,
         fixed_lower, fixed_upper
