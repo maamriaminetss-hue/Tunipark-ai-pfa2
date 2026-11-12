@@ -215,7 +215,7 @@ def build_events(
         key=lambda event: (event["occurred_at"], event["event_id"]),
     )
 
-
+@observe("correlate_events")
 def correlate_events(
     events: Sequence[dict[str, Any]],
     correlation_window_seconds: float = 90,
