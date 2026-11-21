@@ -8,6 +8,7 @@ from aiops_platform.database.models import Event
 
 
 # CREATE : enregistrer un événement
+
 def create_event(
     db: Session,
     event_type: str,
@@ -19,6 +20,8 @@ def create_event(
     metric_value: float | None = None,
     labels: dict | None = None,
     occurred_at: datetime | None = None,
+    event_id: uuid.UUID | None = None,
+    commit: bool = True,
 ) -> Event:
 
     if not event_type.strip():
@@ -35,18 +38,25 @@ def create_event(
         "labels": labels if labels is not None else {},
     }
 
+    if event_id is not None:
+        event_data["id"] = event_id
+
     if occurred_at is not None:
         event_data["occurred_at"] = occurred_at
 
     event = Event(**event_data)
-
     db.add(event)
 
     try:
-        db.commit()
-        db.refresh(event)
+        db.flush()
+
+        if commit:
+            db.commit()
+            db.refresh(event)
+
     except Exception:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
 
     return event

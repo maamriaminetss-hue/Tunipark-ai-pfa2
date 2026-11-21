@@ -1,0 +1,163 @@
+"""Coordinate the runbook catalog with remediation plan management.
+
+RunbookManager is the single source of truth for corrective procedures.
+RemediationEngine receives a derived, read-only action projection so it can
+rank and track plans without maintaining a second independently editable
+catalog. This module does not execute commands or modify external systems.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any
+
+from aiops_platform.intelligence.remediation import RemediationEngine
+from aiops_platform.intelligence.runbooks import RunbookManager
+
+
+class RunbookRemediationWorkflow:
+    """Expose one coordinated flow from runbook catalog to remediation plan."""
+
+    def __init__(self) -> None:
+        self._runbooks = RunbookManager()
+        self._remediation = RemediationEngine()
+
+    @staticmethod
+    def _runbook_to_action(runbook: dict[str, Any]) -> dict[str, Any]:
+        """Build the remediation engine's plan projection from a runbook.
+
+        The runbook remains canonical. The derived action is only an index
+        used for matching and plan status tracking.
+        """
+        steps = runbook["steps"]
+        return {
+            "action_id": runbook["runbook_id"],
+            "title": runbook["title"],
+            "description": runbook["description"],
+            "incident_types": deepcopy(runbook["incident_types"]),
+            "services": deepcopy(runbook["services"]),
+            "risk_level": runbook["risk_level"],
+            "requires_approval": (
+                runbook["risk_level"] in {"high", "critical"}
+                or any(step["requires_approval"] for step in steps)
+            ),
+        }
+
+    def register_runbook(self, runbook: dict[str, Any]) -> None:
+        """Register a canonical runbook and project it into plan matching."""
+        self._runbooks.register_runbook(runbook)
+        canonical = self._runbooks.get_runbook(runbook["runbook_id"])
+        self._remediation.register_action(self._runbook_to_action(canonical))
+
+    def get_runbook(self, runbook_id: str) -> dict[str, Any]:
+        """Return a defensive copy of a canonical runbook."""
+        return self._runbooks.get_runbook(runbook_id)
+
+    def list_runbooks(
+        self,
+        incident_type: str | None = None,
+        service_name: str | None = None,
+        risk_level: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List canonical runbooks with optional filters."""
+        return self._runbooks.list_runbooks(
+            incident_type=incident_type,
+            service_name=service_name,
+            risk_level=risk_level,
+        )
+
+    def recommend_runbooks(
+        self,
+        incident: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Recommend canonical runbooks for an incident."""
+        return self._runbooks.recommend_runbooks(incident)
+
+    def _with_runbook_snapshots(
+        self,
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Attach canonical runbook snapshots to a defensive plan copy."""
+        result = deepcopy(plan)
+        for action in result["actions"]:
+            runbook_id = action["action_id"]
+            action["runbook_id"] = runbook_id
+            action["runbook"] = self._runbooks.get_runbook(runbook_id)
+        return result
+
+    def create_plan(
+        self,
+        incident: dict[str, Any],
+        runbook_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a plan from recommended runbooks without executing them.
+
+        Explicit selections must be among the runbooks recommended for this
+        incident. This prevents callers from bypassing matching policy by
+        supplying an arbitrary catalog identifier.
+        """
+        recommendations = self._runbooks.recommend_runbooks(incident)
+        recommended_ids = {
+            item["runbook"]["runbook_id"] for item in recommendations
+        }
+
+        if runbook_ids is None:
+            selected_ids = [
+                item["runbook"]["runbook_id"] for item in recommendations
+            ]
+        else:
+            if not isinstance(runbook_ids, list) or not runbook_ids:
+                raise ValueError("runbook_ids must be a non-empty list")
+
+            selected_ids = []
+            for runbook_id in runbook_ids:
+                if not isinstance(runbook_id, str) or not runbook_id.strip():
+                    raise ValueError("runbook_id must be a non-empty string")
+                runbook_id = runbook_id.strip()
+                if runbook_id in selected_ids:
+                    raise ValueError(f"Duplicate runbook_id: {runbook_id}")
+                if runbook_id not in recommended_ids:
+                    raise ValueError(
+                        f"Runbook is not recommended for this incident: {runbook_id}"
+                    )
+                selected_ids.append(runbook_id)
+
+        if not selected_ids:
+            raise ValueError("No runbooks match this incident")
+
+        plan = self._remediation.create_plan(
+            incident,
+            action_ids=selected_ids,
+        )
+        return self._with_runbook_snapshots(plan)
+
+    def approve_plan(
+        self,
+        plan_id: str,
+        approved_by: str,
+    ) -> dict[str, Any]:
+        """Record approval for a plan that requires human validation."""
+        plan = self._remediation.approve_plan(plan_id, approved_by)
+        return self._with_runbook_snapshots(plan)
+
+    def update_action(
+        self,
+        plan_id: str,
+        runbook_id: str,
+        status: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Track a runbook-level outcome; this does not run its steps."""
+        plan = self._remediation.update_action(
+            plan_id,
+            runbook_id,
+            status,
+            note=note,
+        )
+        return self._with_runbook_snapshots(plan)
+
+    def get_plan(self, plan_id: str) -> dict[str, Any]:
+        """Return a plan enriched with its canonical runbook definitions."""
+        return self._with_runbook_snapshots(
+            self._remediation.get_plan(plan_id)
+        )

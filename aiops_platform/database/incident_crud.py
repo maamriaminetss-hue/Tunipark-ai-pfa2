@@ -24,6 +24,7 @@ _UNSET = object()
 # CREATE
 # ==================================================
 
+
 def create_incident(
     db: Session,
     title: str,
@@ -31,6 +32,8 @@ def create_incident(
     description: str | None = None,
     service_id: uuid.UUID | None = None,
     commit: bool = True,
+    incident_id: uuid.UUID | None = None,
+    started_at: datetime | None = None,
 ) -> Incident:
 
     if not title.strip():
@@ -39,13 +42,20 @@ def create_incident(
     if severity not in VALID_SEVERITIES:
         raise ValueError(f"Gravité invalide : {severity}")
 
-    incident = Incident(
-        title=title,
-        description=description,
-        severity=severity,
-        service_id=service_id,
-    )
+    incident_data = {
+        "title": title,
+        "description": description,
+        "severity": severity,
+        "service_id": service_id,
+    }
 
+    if incident_id is not None:
+        incident_data["id"] = incident_id
+
+    if started_at is not None:
+        incident_data["started_at"] = started_at
+
+    incident = Incident(**incident_data)
     db.add(incident)
 
     try:
@@ -56,11 +66,10 @@ def create_incident(
             db.refresh(incident)
 
     except Exception:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise
-
     return incident
-
 
 # ==================================================
 # READ ONE

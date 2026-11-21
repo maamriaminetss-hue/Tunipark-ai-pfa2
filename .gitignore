@@ -17,4 +17,3 @@ data/metrics/*.csv
 # Environnements virtuels supplémentaires
 venv/
 venvs/
-.env.example

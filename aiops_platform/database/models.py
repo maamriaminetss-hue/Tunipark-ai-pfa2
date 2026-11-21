@@ -5,11 +5,14 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Integer,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
     String,
+    UniqueConstraint,
     Text,
     Uuid,
     func,
@@ -80,6 +83,49 @@ class Service(Base):
 
 
 # ============================================================
+# ============================================================
+# 1 bis. SERVICE DISCOVERY OBSERVATION
+# Table : app.service_discoveries
+# ============================================================
+
+class ServiceDiscovery(Base):
+    __tablename__ = "service_discoveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "service_name",
+            name="uq_service_discoveries_source_name",
+        ),
+        {"schema": "app"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    service_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    last_sync_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
 # 2. INCIDENT
 # Table : app.incidents
 # ============================================================
@@ -315,3 +361,64 @@ class AuditLog(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+# ============================================================
+# ANOMALY DETECTION EPISODE STATE
+# Table : app.anomaly_detection_states
+# ============================================================
+
+class AnomalyDetectionState(Base):
+    __tablename__ = "anomaly_detection_states"
+    __table_args__ = (
+        UniqueConstraint(
+            "metric_name",
+            "service_name",
+            name="uq_anomaly_detection_state_metric_service",
+        ),
+        {"schema": "app"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+
+    metric_name: Mapped[str] = mapped_column(String, nullable=False)
+    service_name: Mapped[str] = mapped_column(String, nullable=False)
+
+    last_processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    anomaly_streak: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+
+    recovery_streak: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+
+    last_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+

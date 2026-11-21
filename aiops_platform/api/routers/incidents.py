@@ -190,6 +190,18 @@ def modify_incident(
             status_code=400,
             detail="Aucune modification fournie.",
         )
+    # Terminal statuses must only be set through governed workflows.
+    requested_status = updates.get("status")
+
+    if requested_status in {"resolved", "closed"}:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Les statuts 'resolved' et 'closed' ne peuvent pas "
+                "être définis directement. Utilisez le workflow "
+                "de vérification et de clôture des incidents."
+            ),
+    )
 
     existing = get_incident_by_id(db, incident_id)
 
