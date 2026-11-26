@@ -1,5 +1,6 @@
 """Read Prometheus time-series data and export it to CSV."""
 
+from aiops_observability.telemetry import observe
 import argparse
 import os
 import sys
@@ -15,7 +16,7 @@ DEFAULT_QUERY = (
     '(rate(demo_payment_transactions_total{service_name="payment"}[5m]))'
 )
 
-
+@observe("prometheus_query")
 def fetch_range(
     prometheus_url: str,
     query: str,

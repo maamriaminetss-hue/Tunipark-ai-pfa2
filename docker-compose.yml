@@ -1,29 +1,106 @@
-
-services:
+﻿services:
   postgres:
     image: postgres:18-alpine
     container_name: enterprise-aiops-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD is required}
-
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-
     volumes:
-      - postgres_data:/var/lib/postgresql
-
+      - postgres_data_v2:/var/lib/postgresql/18/docker
     healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+      - "4319:4317"
+
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./docker/loki/loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./docker/otel/collector.yaml:/etc/otelcol-contrib/config.yaml
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    depends_on:
+      - jaeger
+      - loki
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    restart: unless-stopped
+    volumes:
+      - ./docker/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    ports:
+      - "127.0.0.1:9115:9115"  
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+ 
+
+
+
+
+
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: tunipark-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: "postgres:5432/enterprise_aiops?sslmode=disable"
+      DATA_SOURCE_USER: "aiops_app"
+      DATA_SOURCE_PASS: "${POSTGRES_ADMIN_PASSWORD}"
+    ports:
+      - "127.0.0.1:9187:9187"
+    depends_on:
+      postgres:
+        condition: service_healthy  
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - jaeger
+
 volumes:
   postgres_data:
+  postgres_data_v2:
+  loki_data:
+  prometheus_data:
+  grafana_data:

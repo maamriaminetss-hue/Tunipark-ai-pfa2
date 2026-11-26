@@ -1,3 +1,4 @@
+
 """One-pass, deduplicated Prometheus-to-PostgreSQL anomaly detection cycle.
 
 The cycle is intentionally invoked explicitly by an API route or an external
@@ -22,16 +23,21 @@ from aiops_platform.database.anomaly_detection_crud import (
 from aiops_platform.database.event_crud import create_event
 from aiops_platform.database.models import Service
 from aiops_platform.detector.anomaly_detector import detect_anomalies
+
 from aiops_platform.intelligence.monitoring.prometheus_anomaly_reader import (
+    DEFAULT_ANOMALY_QUERIES,
+    TUNIPARK_ANOMALY_QUERIES,
     PrometheusAnomalyReader,
 )
 from aiops_platform.intelligence.monitoring.prometheus_freshness_reader import (
+    DEFAULT_FRESHNESS_QUERIES,
+    TUNIPARK_FRESHNESS_QUERIES,
     PrometheusMetricFreshnessReader,
 )
 
 
-# Initial guardrails for the OpenTelemetry Demo. These are configurable
-# operational starting points, not empirically calibrated SLOs.
+# Initial guardrails for the OpenTelemetry Demo.
+# These are configurable operational starting points, not calibrated SLOs.
 DEFAULT_FIXED_UPPER_LIMITS: dict[str, float] = {
     "http_5xx_ratio": 0.05,
     "http_p95_latency_seconds": 1.0,
@@ -39,9 +45,8 @@ DEFAULT_FIXED_UPPER_LIMITS: dict[str, float] = {
     "memory_used_ratio": 0.90,
 }
 
-# Minimum absolute change required for a MAD-only candidate to be treated as
-# operationally meaningful. These are provisional noise floors (ratio units
-# for ratios, seconds for latency), not SLOs. Fixed guardrails remain separate.
+
+# Minimum absolute change required for a MAD-only candidate.
 DEFAULT_MAD_MINIMUM_ABSOLUTE_DEVIATIONS: dict[str, float] = {
     "http_5xx_ratio": 0.01,
     "http_p95_latency_seconds": 0.01,
@@ -80,14 +85,32 @@ class AnomalyDetectionService:
         if max_sample_age_seconds <= 0 or not math.isfinite(max_sample_age_seconds):
             raise ValueError("max_sample_age_seconds must be positive and finite")
 
-        self.reader = reader if reader is not None else PrometheusAnomalyReader()
-        self.freshness_reader = (
-            freshness_reader
-            if freshness_reader is not None
-            else PrometheusMetricFreshnessReader(
-                prometheus_url=getattr(self.reader, "prometheus_url", None)
+        # When no reader is supplied, load both OpenTelemetry Demo and TuniPark
+        # metric queries. Existing custom readers remain untouched.
+        if reader is None:
+            combined_anomaly_queries = {
+                **DEFAULT_ANOMALY_QUERIES,
+                **TUNIPARK_ANOMALY_QUERIES,
+            }
+            self.reader = PrometheusAnomalyReader(
+                queries=combined_anomaly_queries
             )
-        )
+        else:
+            self.reader = reader
+
+        # Configure freshness queries for both metric families.
+        if freshness_reader is None:
+            combined_freshness_queries = {
+                **DEFAULT_FRESHNESS_QUERIES,
+                **TUNIPARK_FRESHNESS_QUERIES,
+            }
+            self.freshness_reader = PrometheusMetricFreshnessReader(
+                prometheus_url=getattr(self.reader, "prometheus_url", None),
+                queries=combined_freshness_queries,
+            )
+        else:
+            self.freshness_reader = freshness_reader
+
         self.history_minutes = history_minutes
         self.step = step
         self.window = window
@@ -101,19 +124,23 @@ class AnomalyDetectionService:
 
         if fixed_upper_limits is None:
             self.fixed_upper_limits = dict(DEFAULT_FIXED_UPPER_LIMITS)
+
             for metric_name in list(self.fixed_upper_limits):
                 env_name = (
                     "ANOMALY_LIMIT_"
                     + metric_name.upper().replace("_", "_")
                 )
                 raw = os.getenv(env_name)
+
                 if raw is not None:
                     try:
                         limit = float(raw)
                     except ValueError as exc:
                         raise ValueError(f"{env_name} must be numeric") from exc
+
                     if not math.isfinite(limit):
                         raise ValueError(f"{env_name} must be finite")
+
                     self.fixed_upper_limits[metric_name] = limit
         else:
             self.fixed_upper_limits = dict(fixed_upper_limits)
@@ -130,17 +157,20 @@ class AnomalyDetectionService:
             self.mad_minimum_absolute_deviations = dict(
                 DEFAULT_MAD_MINIMUM_ABSOLUTE_DEVIATIONS
             )
+
             for metric_name in list(self.mad_minimum_absolute_deviations):
                 env_name = (
                     "ANOMALY_MAD_MIN_DEVIATION_"
                     + metric_name.upper()
                 )
                 raw = os.getenv(env_name)
+
                 if raw is not None:
                     try:
                         minimum = float(raw)
                     except ValueError as exc:
                         raise ValueError(f"{env_name} must be numeric") from exc
+
                     self.mad_minimum_absolute_deviations[metric_name] = minimum
         else:
             self.mad_minimum_absolute_deviations = dict(
@@ -149,24 +179,30 @@ class AnomalyDetectionService:
 
         for metric_name, minimum in self.mad_minimum_absolute_deviations.items():
             if not isinstance(metric_name, str) or not metric_name.strip():
-                raise ValueError("MAD minimum-deviation metric names must be non-empty")
+                raise ValueError(
+                    "MAD minimum-deviation metric names must be non-empty"
+                )
             if isinstance(minimum, bool) or not isinstance(minimum, (int, float)):
                 raise ValueError(
                     f"MAD minimum deviation for {metric_name} must be numeric"
                 )
             if not math.isfinite(float(minimum)) or minimum < 0:
                 raise ValueError(
-                    f"MAD minimum deviation for {metric_name} must be finite and non-negative"
+                    f"MAD minimum deviation for {metric_name} "
+                    "must be finite and non-negative"
                 )
 
     @staticmethod
     def _as_utc_datetime(value: Any) -> datetime:
         if isinstance(value, pd.Timestamp):
             value = value.to_pydatetime()
+
         if not isinstance(value, datetime):
             raise ValueError("Prometheus sample timestamp must be a datetime")
+
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
+
         return value.astimezone(timezone.utc)
 
     @staticmethod
@@ -175,6 +211,7 @@ class AnomalyDetectionService:
             converted = float(value)
         except (TypeError, ValueError):
             return None
+
         return converted if math.isfinite(converted) else None
 
     def analyze_metric_frame(
@@ -185,15 +222,19 @@ class AnomalyDetectionService:
         """Return per-service anomaly decisions without touching the database."""
         if not isinstance(frame, pd.DataFrame):
             raise ValueError("frame must be a pandas DataFrame")
+
         if frame.empty:
             return []
 
         results: dict[tuple[str, datetime], dict[str, Any]] = {}
+
         methods = [
             ("mad", self.mad_threshold, None),
             ("ewma", self.ewma_threshold, None),
         ]
+
         fixed_limit = self.fixed_upper_limits.get(metric_name)
+
         if fixed_limit is not None:
             methods.append(("fixed", 0.0, fixed_limit))
 
@@ -207,12 +248,16 @@ class AnomalyDetectionService:
                 alpha=self.ewma_alpha,
                 fixed_upper=fixed_upper,
             )
+
             for row in detected.to_dict(orient="records"):
                 service_name = row.get("service_name")
+
                 if not isinstance(service_name, str) or not service_name.strip():
                     continue
+
                 timestamp = self._as_utc_datetime(row.get("timestamp"))
                 key = (service_name.strip(), timestamp)
+
                 item = results.setdefault(
                     key,
                     {
@@ -227,24 +272,26 @@ class AnomalyDetectionService:
                         "reasons": {},
                     },
                 )
+
                 score = self._finite_or_none(row.get("score"))
                 expected = self._finite_or_none(row.get("expected"))
                 reason = str(row.get("reason", "unknown"))
                 is_anomaly = bool(row.get("is_anomaly"))
 
-                # MAD is scale-relative. If historical MAD is zero or tiny,
-                # a practically negligible absolute change can receive an
-                # enormous score. Apply a metric-specific absolute floor only
-                # to MAD candidates; EWMA and fixed guardrails remain intact.
+                # Apply the metric-specific absolute floor only to MAD.
                 if method == "mad" and is_anomaly:
-                    minimum_deviation = self.mad_minimum_absolute_deviations.get(
-                        metric_name, 0.0
+                    minimum_deviation = (
+                        self.mad_minimum_absolute_deviations.get(
+                            metric_name, 0.0
+                        )
                     )
+
                     absolute_deviation = (
                         abs(float(row["value"]) - expected)
                         if expected is not None
                         else 0.0
                     )
+
                     if absolute_deviation < minimum_deviation:
                         is_anomaly = False
                         reason = "below_metric_minimum_absolute_deviation"
@@ -252,10 +299,12 @@ class AnomalyDetectionService:
                 item["scores"][method] = score
                 item["expected"][method] = expected
                 item["reasons"][method] = reason
+
                 if is_anomaly:
                     item["methods"].append(method)
 
         output = []
+
         for item in results.values():
             item["methods"] = sorted(set(item["methods"]))
             item["is_anomaly"] = bool(item["methods"])
@@ -270,10 +319,15 @@ class AnomalyDetectionService:
     def _event_severity(self, metric_name: str, value: float) -> str:
         if metric_name == "http_5xx_ratio" and value >= 0.20:
             return "high"
+
         if metric_name == "http_p95_latency_seconds" and value >= 2.0:
             return "high"
+
         if metric_name in {"cpu_busy_ratio", "memory_used_ratio"} and value >= 0.98:
             return "high"
+
+        # TuniPark currently uses the conservative warning severity.
+        # Calibrate its severity thresholds from observed data before changing.
         return "warning"
 
     def _create_anomaly_event(
@@ -282,15 +336,20 @@ class AnomalyDetectionService:
         observation: dict[str, Any],
     ) -> Any:
         service_id = db.scalar(
-            select(Service.id).where(Service.name == observation["service_name"])
+            select(Service.id).where(
+                Service.name == observation["service_name"]
+            )
         )
+
         metric_name = observation["metric_name"]
         value = float(observation["value"])
         methods = observation["methods"]
+
         message = (
             f"Anomaly confirmed for service {observation['service_name']}: "
             f"{metric_name}={value:.6g}; methods={','.join(methods)}."
         )
+
         return create_event(
             db=db,
             event_type="metric_anomaly",
@@ -314,7 +373,12 @@ class AnomalyDetectionService:
             commit=False,
         )
 
-    def run_once(self, db: Session, *, end: datetime | None = None) -> dict[str, Any]:
+    def run_once(
+        self,
+        db: Session,
+        *,
+        end: datetime | None = None,
+    ) -> dict[str, Any]:
         """Fetch metrics, evaluate latest new samples, and persist events/state.
 
         Each event is emitted only on transition into an anomaly episode after
@@ -322,6 +386,7 @@ class AnomalyDetectionService:
         required before the same metric/service can trigger a new episode.
         """
         end_at = self._as_utc_datetime(end or datetime.now(timezone.utc))
+
         metric_results: dict[str, dict[str, Any]] = {}
         total_processed = 0
         total_events = 0
@@ -336,10 +401,12 @@ class AnomalyDetectionService:
                     step=self.step,
                     end=end_at,
                 )
+
                 ages = self.freshness_reader.fetch_sample_ages(
                     metric_name,
                     end=end_at,
                 )
+
             except Exception as exc:
                 metric_results[metric_name] = {
                     "status": "error",
@@ -348,6 +415,7 @@ class AnomalyDetectionService:
                 continue
 
             succeeded += 1
+
             if frame.empty:
                 metric_results[metric_name] = {
                     "status": "no_data",
@@ -360,16 +428,23 @@ class AnomalyDetectionService:
                 continue
 
             analyzed = self.analyze_metric_frame(metric_name, frame)
+
             by_service: dict[str, list[dict[str, Any]]] = {}
+
             for item in analyzed:
                 by_service.setdefault(item["service_name"], []).append(item)
 
             metric_processed = 0
             metric_events = 0
             metric_stale = 0
+
             for service_name, observations in by_service.items():
                 sample_age = ages.get(service_name)
-                if sample_age is None or sample_age > self.max_sample_age_seconds:
+
+                if (
+                    sample_age is None
+                    or sample_age > self.max_sample_age_seconds
+                ):
                     metric_stale += 1
                     continue
 
@@ -378,14 +453,21 @@ class AnomalyDetectionService:
                     metric_name=metric_name,
                     service_name=service_name,
                 )
+
                 observations.sort(key=lambda item: item["timestamp"])
 
                 if state.last_processed_at is None:
-                    new_observations = observations[-self.confirmation_samples :]
+                    new_observations = observations[
+                        -self.confirmation_samples:
+                    ]
                 else:
-                    last_processed = self._as_utc_datetime(state.last_processed_at)
+                    last_processed = self._as_utc_datetime(
+                        state.last_processed_at
+                    )
+
                     new_observations = [
-                        item for item in observations
+                        item
+                        for item in observations
                         if item["timestamp"] > last_processed
                     ]
 
@@ -393,6 +475,7 @@ class AnomalyDetectionService:
                     if observation["is_anomaly"]:
                         state.anomaly_streak += 1
                         state.recovery_streak = 0
+
                         if (
                             not state.is_active
                             and state.anomaly_streak >= self.confirmation_samples
@@ -401,10 +484,13 @@ class AnomalyDetectionService:
                             state.is_active = True
                             state.last_event_id = event.id
                             metric_events += 1
+
                     else:
                         state.anomaly_streak = 0
+
                         if state.is_active:
                             state.recovery_streak += 1
+
                             if state.recovery_streak >= self.recovery_samples:
                                 state.is_active = False
                                 state.recovery_streak = 0
@@ -434,6 +520,7 @@ class AnomalyDetectionService:
             raise
 
         total_metrics = len(self.reader.queries)
+
         if succeeded == 0:
             status = "error"
         elif succeeded < total_metrics:

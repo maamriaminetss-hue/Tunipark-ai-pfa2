@@ -18,16 +18,16 @@ def make_response(payload):
 def test_fetch_services_returns_sorted_unique_names():
     http_get = Mock(
         return_value=make_response(
-            {"services": ["checkout", "frontend", "checkout", " ", None]}
+            {"data": ["checkout", "frontend", "checkout", " ", None]}
         )
     )
     reader = JaegerDependencyReader(http_get=http_get)
 
     assert reader.fetch_services() == ["checkout", "frontend"]
     http_get.assert_called_once_with(
-        "http://localhost:16686/jaeger/ui/api/v3/services",
+        "http://localhost:16686/api/services",
         params=None,
-        timeout=5.0,
+        timeout=10.0,
     )
 
 

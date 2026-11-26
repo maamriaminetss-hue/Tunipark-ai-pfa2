@@ -7,6 +7,7 @@ import requests
 
 from aiops_platform.intelligence.monitoring.prometheus_anomaly_reader import (
     DEFAULT_ANOMALY_QUERIES,
+    TUNIPARK_ANOMALY_QUERIES,
     PrometheusAnomalyReader,
     PrometheusAnomalyReaderError,
 )
@@ -160,6 +161,26 @@ def test_fetch_all_reuses_one_consistent_end_timestamp():
 
 def test_default_promql_parentheses_are_balanced():
     for query in DEFAULT_ANOMALY_QUERIES.values():
+        depth = 0
+        for char in query:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                assert depth >= 0
+        assert depth == 0
+
+def test_tunipark_queries_normalize_exported_job():
+    assert set(TUNIPARK_ANOMALY_QUERIES) == {
+        "tunipark_http_5xx_ratio",
+        "tunipark_http_p95_latency_seconds",
+    }
+
+    for query in TUNIPARK_ANOMALY_QUERIES.values():
+        assert 'exported_job="tunipark-ai-backend"' in query
+        assert '"service_name", "$1", "exported_job"' in query
+
+    for query in TUNIPARK_ANOMALY_QUERIES.values():
         depth = 0
         for char in query:
             if char == "(":

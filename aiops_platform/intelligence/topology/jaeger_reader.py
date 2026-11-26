@@ -1,3 +1,4 @@
+
 """Read service dependencies from the Jaeger HTTP API."""
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ class JaegerDependencyReader:
     def __init__(
         self,
         api_base_url: str | None = None,
-        timeout_seconds: float = 5.0,
+        timeout_seconds: float = 10.0,
         http_get: Callable[..., Any] | None = None,
     ) -> None:
         base_url = (
@@ -29,7 +30,7 @@ class JaegerDependencyReader:
             if api_base_url is not None
             else os.getenv(
                 "JAEGER_API_BASE_URL",
-                "http://localhost:16686/jaeger/ui/api",
+                "http://localhost:16686/api",
             )
         )
 
@@ -50,6 +51,7 @@ class JaegerDependencyReader:
         params: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """Perform an HTTP GET and validate the JSON response."""
+
         url = f"{self.api_base_url}/{endpoint.lstrip('/')}"
 
         try:
@@ -75,12 +77,13 @@ class JaegerDependencyReader:
 
     def fetch_services(self) -> list[str]:
         """Return a sorted, unique snapshot from Jaeger's services API."""
-        payload = self._get_json("v3/services")
-        raw_services = payload.get("services")
+
+        payload = self._get_json("services")
+        raw_services = payload.get("data")
 
         if not isinstance(raw_services, list):
             raise JaegerClientError(
-                "Jaeger services response must contain a list named 'services'"
+                "Jaeger services response must contain a list named 'data'"
             )
 
         names = {
@@ -88,7 +91,9 @@ class JaegerDependencyReader:
             for item in raw_services
             if isinstance(item, str) and item.strip()
         }
+
         return sorted(names)
+
     def fetch_topology(
         self,
         lookback_ms: int = 3_600_000,
@@ -100,6 +105,7 @@ class JaegerDependencyReader:
         In ServiceTopology, this is represented as:
         caller depends on callee.
         """
+
         if (
             isinstance(lookback_ms, bool)
             or not isinstance(lookback_ms, int)
@@ -118,7 +124,8 @@ class JaegerDependencyReader:
         ):
             raise ValueError("end_ts must be a positive integer")
 
-        services_payload = self._get_json("v3/services")
+        services_payload = self._get_json("services")
+
         dependencies_payload = self._get_json(
             "dependencies",
             params={
@@ -127,12 +134,12 @@ class JaegerDependencyReader:
             },
         )
 
-        raw_services = services_payload.get("services")
+        raw_services = services_payload.get("data")
         raw_dependencies = dependencies_payload.get("data")
 
         if not isinstance(raw_services, list):
             raise JaegerClientError(
-                "Jaeger services response must contain a list named 'services'"
+                "Jaeger services response must contain a list named 'data'"
             )
 
         if not isinstance(raw_dependencies, list):
@@ -205,7 +212,7 @@ class JaegerDependencyReader:
             edge = (parent, child)
             edge_counts[edge] = edge_counts.get(edge, 0) + call_count
 
-        # A dependency may refer to a service absent from /v3/services.
+        # A dependency may refer to a service absent from /api/services.
         listed_services = {
             item.strip()
             for item in raw_services

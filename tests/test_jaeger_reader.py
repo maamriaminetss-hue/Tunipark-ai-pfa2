@@ -20,7 +20,7 @@ def test_fetch_topology_builds_graph_and_ignores_self_calls():
     http_get = Mock(
         side_effect=[
             make_response({
-                "services": ["frontend", "catalog"],
+                "data": ["frontend", "catalog"],
             }),
             make_response({
                 "data": [
@@ -40,7 +40,7 @@ def test_fetch_topology_builds_graph_and_ignores_self_calls():
     )
 
     reader = JaegerDependencyReader(
-        api_base_url="http://localhost:16686/jaeger/ui/api",
+        api_base_url="http://localhost:16686/api",
         http_get=http_get,
     )
 
@@ -73,7 +73,7 @@ def test_fetch_topology_builds_graph_and_ignores_self_calls():
 def test_fetch_topology_rejects_circular_dependency():
     http_get = Mock(
         side_effect=[
-            make_response({"services": ["frontend", "catalog"]}),
+            make_response({"data": ["frontend", "catalog"]}),
             make_response({
                 "data": [
                     {
@@ -103,7 +103,7 @@ def test_fetch_topology_rejects_circular_dependency():
 def test_fetch_topology_adds_services_found_in_dependencies():
     http_get = Mock(
         side_effect=[
-            make_response({"services": ["frontend"]}),
+            make_response({"data": ["frontend"]}),
             make_response({
                 "data": [
                     {

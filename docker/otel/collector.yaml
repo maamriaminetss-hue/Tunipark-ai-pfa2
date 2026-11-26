@@ -1,5 +1,4 @@
-﻿
-receivers:
+﻿receivers:
   otlp:
     protocols:
       grpc:
@@ -31,12 +30,10 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug, otlp/jaeger]
-
     metrics:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug, prometheus]
-
     logs:
       receivers: [otlp]
       processors: [batch]
